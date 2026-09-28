@@ -105,6 +105,11 @@
   .chart-wrap{overflow-x:auto;}
   svg text{fill:var(--muted);}
   .disc{border-left:3px solid var(--orange); background:var(--orange-bg); color:var(--ink); padding:10px 14px; border-radius:8px; font-size:.84rem; margin-top:8px;}
+  .ms-head,.ms-row{display:grid; grid-template-columns:1fr auto auto; gap:12px; padding:9px 4px; font-size:.9rem; align-items:center;}
+  .ms-head{color:var(--muted); font-size:.76rem; border-bottom:1px solid var(--line);}
+  .ms-row{border-bottom:1px solid var(--line);}
+  .ms-head span:nth-child(n+2),.ms-row span:nth-child(n+2){text-align:right; font-variant-numeric:tabular-nums; min-width:82px;}
+  .ms-summary{margin-top:12px; font-size:.9rem; background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:10px 12px;}
 </style>
 </head>
 <body>
@@ -154,6 +159,14 @@
       <span><span class="sw" style="background:#f97316"></span> โอกาสเกิดฝน (%)</span>
       <span id="fcMsg" class="loading">กำลังโหลด…</span>
     </div>
+  </section>
+
+  <!-- MULTI-SOURCE ANALYSIS -->
+  <section class="card">
+    <h2>🔀 การวิเคราะห์หลายแหล่ง (ความเชื่อมั่นพยากรณ์)</h2>
+    <p class="hint">เทียบพยากรณ์ฝนจากหลายแบบจำลอง/หน่วยงานอิสระ เพื่อหา “ค่าคาดการณ์ร่วม” และดูความสอดคล้อง — ยิ่งหลายแหล่งตรงกัน ยิ่งเชื่อถือได้ · ระบบจะนำค่าที่ปลอดภัยที่สุดมาประเมินความเสี่ยง</p>
+    <div id="msRows"><div class="loading">กำลังดึงข้อมูลหลายแหล่ง…</div></div>
+    <div id="msSummary" class="ms-summary" style="display:none"></div>
   </section>
 
   <!-- RADAR MAP -->
@@ -312,13 +325,24 @@ function renderWeather(d){
   const todayProb = probMax[7]!=null?probMax[7]:(probMax[0]!=null?probMax[0]:null); // index 7 = วันนี้ (หลังอดีต 7 วัน)
   $('sProb').innerHTML = (todayProb==null?'–':fmt(todayProb,0))+'<small> %</small>';
 
-  computeRisk(past24, next24, next72);
+  PRIMARY={past24, next24, next72};
+  computeRisk();
   drawChart(day, nowIdx);
   $('fcMsg').textContent = 'อัปเดต '+new Date().toLocaleTimeString('th-TH',{timeStyle:'short'});
 }
 
-/* ===== ประเมินความเสี่ยง ===== */
-function computeRisk(past24, next24, next72){
+/* ===== ประเมินความเสี่ยง (อ่านค่าจากตัวแปรรวม PRIMARY + CONSENSUS) ===== */
+let PRIMARY={past24:0,next24:0,next72:0}, CONSENSUS=null;
+function computeRisk(){
+  if(!PRIMARY) return;
+  const past24=PRIMARY.past24;
+  // ใช้ค่าที่ปลอดภัยที่สุด: มากกว่าระหว่างแหล่งหลักกับค่าคาดการณ์ร่วมหลายแหล่ง
+  let next24=PRIMARY.next24, next72=PRIMARY.next72, srcNote='';
+  if(CONSENSUS && CONSENSUS.n24avg!=null){
+    next24=Math.max(PRIMARY.next24, CONSENSUS.n24avg);
+    if(CONSENSUS.n72avg!=null) next72=Math.max(PRIMARY.next72, CONSENSUS.n72avg);
+    srcNote=` · วิเคราะห์ร่วม ${CONSENSUS.count} แหล่ง (ความสอดคล้อง${CONSENSUS.conf})`;
+  }
   let score = past24 + 0.8*next24;
   // ปรับตามระดับความสูงพื้นที่: ยิ่งต่ำยิ่งเพิ่มความเสี่ยง
   const ec=elevContext(AREA_ELEV);
@@ -344,7 +368,7 @@ function computeRisk(past24, next24, next72){
   const elevNote = (AREA_ELEV!=null)? ` · ระดับพื้นที่ ${fmt(AREA_ELEV,0)} ม.` : '';
   $('rkDesc').innerHTML = desc +
     ` <br><b>คะแนนความเสี่ยง ≈ ${fmt(score,0)}</b> `+
-    `(ฝนสะสม 24 ชม. ${fmt(past24,1)} มม. + พยากรณ์ 24 ชม. ${fmt(next24,1)} มม. · คาด 72 ชม. ${fmt(next72,0)} มม.${elevNote})`;
+    `(ฝนสะสม 24 ชม. ${fmt(past24,1)} มม. + พยากรณ์ 24 ชม. ${fmt(next24,1)} มม. · คาด 72 ชม. ${fmt(next72,0)} มม.${elevNote}${srcNote})`;
 
   const pos = Math.max(2, Math.min(98, (score/160)*100));
   $('rkCursor').style.left = pos+'%';
@@ -387,13 +411,68 @@ function drawChart(day, nowIdx){
   svg.innerHTML=s;
 }
 
+/* ===== การวิเคราะห์หลายแหล่ง (multi-source) ===== */
+async function omModel(model){
+  const url=`https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}`+
+    `&hourly=precipitation&forecast_days=4&timezone=Asia%2FBangkok`+(model?('&models='+model):'');
+  const r=await fetch(url,{cache:'no-store'}); if(!r.ok) throw new Error('om');
+  const d=await r.json(); const t=(d.hourly&&d.hourly.time)||[], p=(d.hourly&&d.hourly.precipitation)||[];
+  const now=new Date(); let i=t.findIndex(x=>new Date(x)>now); if(i<0)i=0;
+  return {n24:sumRange(p,i,i+24), n72:sumRange(p,i,i+72)};
+}
+async function metnoSrc(){
+  const r=await fetch(`https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=${LAT.toFixed(4)}&lon=${LON.toFixed(4)}`,{cache:'no-store'});
+  if(!r.ok) throw new Error('metno');
+  const d=await r.json(); const ts=(d.properties&&d.properties.timeseries)||[]; const now=Date.now();
+  let n24=0,n24ok=false;
+  for(const e of ts){ const hrs=(new Date(e.time).getTime()-now)/3.6e6;
+    const det=e.data&&e.data.next_1_hours&&e.data.next_1_hours.details;
+    if(det&&det.precipitation_amount!=null&&hrs>=-1&&hrs<24){ n24+=det.precipitation_amount; n24ok=true; } }
+  return {n24: n24ok?n24:null, n72:null};
+}
+async function loadMultiSource(){
+  const rowsEl=$('msRows'), sumEl=$('msSummary');
+  const jobs=[
+    {name:'Open-Meteo · ECMWF/ผสม', fn:()=>omModel('')},
+    {name:'Open-Meteo · GFS (สหรัฐฯ)', fn:()=>omModel('gfs_seamless')},
+    {name:'MET Norway · Yr (นอร์เวย์)', fn:()=>metnoSrc()},
+  ];
+  const res=await Promise.allSettled(jobs.map(j=>j.fn()));
+  const src=res.map((r,i)=> r.status==='fulfilled'?{name:jobs[i].name,...r.value}:{name:jobs[i].name,err:true});
+  let html='<div class="ms-head"><span>แหล่งข้อมูล</span><span>ฝน 24 ชม.</span><span>ฝน 72 ชม.</span></div>';
+  src.forEach(s=>{ html+=`<div class="ms-row"><span>${s.name}</span>`+
+    `<span>${s.err||s.n24==null?'—':fmt(s.n24,1)+' มม.'}</span>`+
+    `<span>${s.err||s.n72==null?'—':fmt(s.n72,0)+' มม.'}</span></div>`; });
+  rowsEl.innerHTML=html;
+  const v24=src.filter(s=>!s.err&&s.n24!=null).map(s=>s.n24);
+  const v72=src.filter(s=>!s.err&&s.n72!=null).map(s=>s.n72);
+  if(v24.length){
+    const avg=v24.reduce((a,b)=>a+b,0)/v24.length, mn=Math.min(...v24), mx=Math.max(...v24);
+    const spread= avg>1 ? (mx-mn)/avg : 0;
+    const conf= spread<0.4?'สูง': spread<0.9?'ปานกลาง':'ต่ำ';
+    const confCol= conf==='สูง'?'var(--green)': conf==='ปานกลาง'?'var(--yellow)':'var(--orange)';
+    const avg72= v72.length? v72.reduce((a,b)=>a+b,0)/v72.length : null;
+    CONSENSUS={n24avg:avg, n24min:mn, n24max:mx, n72avg:avg72, conf, count:v24.length};
+    sumEl.style.display='block';
+    sumEl.innerHTML=`ค่าคาดการณ์ร่วม 24 ชม. ≈ <b>${fmt(avg,1)} มม.</b> (ช่วง ${fmt(mn,1)}–${fmt(mx,1)} มม.)`+
+      (avg72!=null?` · 72 ชม. ≈ <b>${fmt(avg72,0)} มม.</b>`:'')+
+      ` · ความสอดคล้องของแหล่งข้อมูล: <b style="color:${confCol}">${conf}</b>`+
+      (conf==='ต่ำ'?' <span style="color:var(--muted)">(แบบจำลองยังไม่ลงตัว ควรติดตามใกล้ชิด)</span>':'');
+    computeRisk();
+  } else {
+    sumEl.style.display='block';
+    sumEl.innerHTML='<span class="err">ดึงข้อมูลเปรียบเทียบไม่สำเร็จ — ใช้ค่าจากแหล่งหลักแทน</span>';
+  }
+}
+
 /* ===== แผนที่ + เรดาร์ RainViewer ===== */
 let map, marker, radarLayer, frames=[], frameIdx=0, playing=false, playTimer=null, rvHost='';
 function initMap(){
   if(typeof L==='undefined'){ $('map').innerHTML='<div style="padding:20px;color:var(--muted)">โหลดไลบรารีแผนที่ไม่สำเร็จ — โปรดเปิดไฟล์นี้ในเบราว์เซอร์ (Chrome/Edge) ที่ต่ออินเทอร์เน็ต</div>'; return; }
   map=L.map('map',{zoomControl:true, attributionControl:true}).setView([LAT,LON],10);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-    maxZoom:19, attribution:'© OpenStreetMap'}).addTo(map);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{
+    subdomains:'abcd', maxZoom:20,
+    attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
   const icon=L.divIcon({className:'', html:'<div style="width:18px;height:18px;background:#ef4444;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 2px #ef4444"></div>',iconSize:[18,18],iconAnchor:[9,9]});
   marker=L.marker([LAT,LON],{icon}).addTo(map).bindPopup('<b>ต.ขุนตัดหวาย</b><br>อ.จะนะ จ.สงขลา');
   L.circle([LAT,LON],{radius:5000,color:'#ef4444',weight:1,fill:false,dashArray:'4 4'}).addTo(map);
@@ -437,13 +516,15 @@ function refreshTMD(){
 }
 
 /* ===== เริ่มทำงาน + auto refresh ===== */
-$('refreshBtn').addEventListener('click', ()=>{ loadWeather(); loadRadar(); refreshTMD(); });
+$('refreshBtn').addEventListener('click', ()=>{ loadWeather(); loadMultiSource(); loadRadar(); refreshTMD(); });
 $('playBtn').addEventListener('click', togglePlay);
 initMap();
 loadWeather();
+loadMultiSource();
 refreshTMD();
-setInterval(loadWeather, 10*60*1000);   // ข้อมูลฝนทุก 10 นาที
-setInterval(loadRadar, 5*60*1000);      // เรดาร์ทุก 5 นาที
+setInterval(loadWeather, 10*60*1000);      // ข้อมูลฝนทุก 10 นาที
+setInterval(loadMultiSource, 10*60*1000);  // วิเคราะห์หลายแหล่งทุก 10 นาที
+setInterval(loadRadar, 5*60*1000);         // เรดาร์ทุก 5 นาที
 setInterval(refreshTMD, 5*60*1000);
 </script>
 </body>
