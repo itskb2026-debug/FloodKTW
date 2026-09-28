@@ -228,8 +228,21 @@
       <a class="link" href="https://weather.tmd.go.th/stpLoop.php" target="_blank" rel="noopener">
         <div class="lt">📡 เรดาร์สทิงพระ (ภาพเคลื่อนไหว)</div>
         <div class="ld">ภาพเรดาร์ฝนล่าสุดแบบวนภาพ กรมอุตุฯ</div></a>
+      <a class="link" href="https://www.pbwatch.net/PattaniWaterGIS/flood_report/index.php" target="_blank" rel="noopener">
+        <div class="lt">📍 ปักหมุดน้ำท่วมชุมชน (pbwatch)</div>
+        <div class="ld">แผนที่รายงานจุดน้ำท่วมจริงโดยชุมชน ลุ่มน้ำปัตตานี (พื้นที่ใกล้เคียง)</div></a>
     </div>
     <div class="disc">หมายเหตุ: ระดับน้ำในคลองแบบเรียลไทม์ต้องดูจากสถานีทางการ (ลิงก์ด้านบน) เนื่องจากหน่วยงานไม่เปิด API สาธารณะให้ฝังตรงในหน้าเว็บภายนอก หากมีสถานีวัดที่คุณใช้อ้างอิงประจำ แจ้งชื่อสถานีมา ผมจะปักหมุดและทำลิงก์ลัดให้เฉพาะจุด</div>
+  </section>
+
+  <!-- PBWATCH COMMUNITY FLOOD MAP -->
+  <section class="card">
+    <h2>📍 แผนที่ปักหมุดน้ำท่วมชุมชน — pbwatch (ลุ่มน้ำปัตตานี/พื้นที่ใกล้เคียง)</h2>
+    <p class="hint">ระบบรายงานจุดน้ำท่วมจริงโดยชุมชน (PattaniWaterGIS) ใช้ดูว่ามีรายงานน้ำท่วมในพื้นที่ภาคใต้ตอนล่างใกล้ ต.ขุนตัดหวายหรือไม่ ประกอบการเฝ้าระวัง — เลื่อน/ซูมแผนที่ไปที่ อ.จะนะ เพื่อดูหมุดใกล้ตัว</p>
+    <iframe class="frame" id="pbwatch" height="460" loading="lazy"
+      src="https://www.pbwatch.net/PattaniWaterGIS/flood_report/index.php"></iframe>
+    <p class="hint" id="pbMsg" style="margin-top:8px;">หากแผนที่ไม่แสดง (เว็บอาจไม่อนุญาตให้ฝัง) เปิดตรงได้ที่ →
+      <a href="https://www.pbwatch.net/PattaniWaterGIS/flood_report/index.php" target="_blank" rel="noopener">pbwatch.net · PattaniWaterGIS</a></p>
   </section>
 
   <!-- METHODOLOGY -->
@@ -246,7 +259,7 @@
   </section>
 
   <footer>
-    <p>แหล่งข้อมูล: Open-Meteo · RainViewer · Windy · กรมอุตุนิยมวิทยา (เรดาร์สทิงพระ) · คลังข้อมูลน้ำแห่งชาติ/สสน. · กรมชลประทาน · กรมทรัพยากรน้ำ</p>
+    <p>แหล่งข้อมูล: Open-Meteo · RainViewer · Windy · MET Norway · กรมอุตุนิยมวิทยา (เรดาร์สทิงพระ) · คลังข้อมูลน้ำแห่งชาติ/สสน. · กรมชลประทาน · กรมทรัพยากรน้ำ · pbwatch (PattaniWaterGIS)</p>
     <p>สร้างสำหรับพื้นที่ ต.ขุนตัดหวาย อ.จะนะ จ.สงขลา · ข้อมูลอัปเดตอัตโนมัติทุก 10 นาที</p>
   </footer>
 </div>
@@ -470,9 +483,8 @@ let map, marker, radarLayer, frames=[], frameIdx=0, playing=false, playTimer=nul
 function initMap(){
   if(typeof L==='undefined'){ $('map').innerHTML='<div style="padding:20px;color:var(--muted)">โหลดไลบรารีแผนที่ไม่สำเร็จ — โปรดเปิดไฟล์นี้ในเบราว์เซอร์ (Chrome/Edge) ที่ต่ออินเทอร์เน็ต</div>'; return; }
   map=L.map('map',{zoomControl:true, attributionControl:true}).setView([LAT,LON],10);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{
-    subdomains:'abcd', maxZoom:20,
-    attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',{
+    maxZoom:18, attribution:'Tiles &copy; Esri — Esri, USGS, NOAA'}).addTo(map);
   const icon=L.divIcon({className:'', html:'<div style="width:18px;height:18px;background:#ef4444;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 2px #ef4444"></div>',iconSize:[18,18],iconAnchor:[9,9]});
   marker=L.marker([LAT,LON],{icon}).addTo(map).bindPopup('<b>ต.ขุนตัดหวาย</b><br>อ.จะนะ จ.สงขลา');
   L.circle([LAT,LON],{radius:5000,color:'#ef4444',weight:1,fill:false,dashArray:'4 4'}).addTo(map);
