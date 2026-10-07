@@ -517,52 +517,76 @@ async function loadMultiSource(){
 }
 
 /* ===== ระดับน้ำคลอง จาก thaiwater.net (อ.จะนะ + อ.นาทวี) ===== */
-/* ===== ตัวช่วยเรียก thaiwater.net: แคชในเครื่อง + คิว + backoff เมื่อโดน HTTP 429 ===== */
-const TW_TTL=10*60*1000;           // ใช้ข้อมูลแคชถ้าใหม่กว่า 10 นาที (ลดจำนวนครั้งที่ยิง API)
-const TW_GAP=1500;                 // เว้นระยะระหว่างคำขอ ไม่ยิงพร้อมกัน
+/* ===== ข้อมูล thaiwater.net (อ.จะนะ + อ.นาทวี) =====
+   หมายเหตุ: เซิร์ฟเวอร์ api-v3.thaiwater.net ตอบ HTTP 429 "การใช้งานถึง limit ที่กำหนด" เมื่อถูกเรียกจากหน้าเว็บภายนอก
+   (ตรวจสอบแล้ว: เรียกจากหน้า thaiwater เองได้ปกติ แต่จากโดเมนอื่น/ไฟล์ในเครื่องจะโดน 429) จึงมี "ข้อมูลสำรองฝังไว้" ให้แสดงแทน
+   และเมื่อได้รับอนุญาต/คีย์จาก สสน. หรือมีตัวกลางดึงข้อมูล ระบบจะแสดงข้อมูลสดโดยอัตโนมัติ */
+const TW_BASE='https://api-v3.thaiwater.net/api/v1/thaiwater30/public/';
+const WL_URL=TW_BASE+'waterlevel_load?province_code=90';
+const RN_URL=TW_BASE+'rain_24h?province_code=90';
+const TW_TTL=10*60*1000;           // ถ้าเคยดึงสดสำเร็จ ใช้แคช 10 นาที
+const WL_IDS=['849','850'];        // 849 = จะนะ (คลองลึก) · 850 = นาทวี (คลองนาทวี)
+const WL_AMPHOE=['จะนะ','นาทวี'];
+const SNAP_T=new Date('2026-10-07T19:40:00+07:00').getTime();   // เวลาของข้อมูลสำรอง
+const mkS=(sid,n,a,t,extra)=>Object.assign({station:{id:sid,tele_station_name:{th:n}},geocode:{amphoe_name:{th:a},tumbon_name:{th:t}}},extra);
+const SNAP_RAIN=[
+ mkS(1080980,'บ้านหว้าหลัง','นาทวี','สะท้อน',{rain_1h:0,rain_24h:18.5,rainfall_datetime:'2026-10-07 18:00'}),
+ mkS(2016,'บ้านวัด','นาทวี','ประกอบ',{rain_1h:0,rain_24h:10,rainfall_datetime:'2026-10-07 18:00'}),
+ mkS(2010,'บ้านปากช่อง','จะนะ','จะโหนง',{rain_1h:0,rain_24h:9,rainfall_datetime:'2026-10-07 18:00'}),
+ mkS(2011,'บ้านคูนายสังข์','จะนะ','แค',{rain_1h:0,rain_24h:6,rainfall_datetime:'2026-10-07 18:00'}),
+ mkS(1080981,'บ้านปลายคลอง','นาทวี','คลองทราย',{rain_1h:0,rain_24h:5.5,rainfall_datetime:'2026-10-07 18:00'}),
+ mkS(849,'จะนะ','จะนะ','บ้านนา',{rain_1h:0,rain_24h:4.8,rainfall_datetime:'2026-10-07 19:00'}),
+ mkS(1081003,'บ้านคลองไข่มุก','นาทวี','คลองกวาง',{rain_1h:0,rain_24h:4.5,rainfall_datetime:'2026-10-07 18:00'}),
+ mkS(2009,'บ้านเขานา','นาทวี','คลองทราย',{rain_1h:0,rain_24h:3.5,rainfall_datetime:'2026-10-07 18:00'}),
+ mkS(1080973,'บ้านวังใหญ่','นาทวี','นาทวี',{rain_1h:0,rain_24h:0.5,rainfall_datetime:'2026-10-07 18:00'}),
+ mkS(1123670,'บ้านบ่อต้นแซะ','จะนะ','บ้านนา',{rain_1h:0,rain_24h:0,rainfall_datetime:'2026-10-07 18:00'}),
+ mkS(850,'นาทวี','นาทวี','นาทวี',{rain_1h:0,rain_24h:0,rainfall_datetime:'2026-10-07 19:00'}),
+ mkS(2008,'บ้านควนไม้ไผ่','จะนะ','นาหว้า',{rain_1h:0,rain_24h:0,rainfall_datetime:'2026-10-07 18:00'}),
+ mkS(2012,'บ้านตลาดนาทวี','นาทวี','นาทวี',{rain_1h:0,rain_24h:0,rainfall_datetime:'2026-10-07 18:00'}),
+ mkS(2013,'บ้านคลองทุเรียน','นาทวี','นาทวี',{rain_1h:0,rain_24h:0,rainfall_datetime:'2026-10-07 18:00'}),
+ mkS(2014,'บ้านคอก-วังไทร','นาทวี','ทับช้าง',{rain_1h:0,rain_24h:0,rainfall_datetime:'2026-10-07 18:00'}),
+ mkS(1080896,'บ้านทุ่งลัง','นาทวี','สะท้อน',{rain_1h:0,rain_24h:0,rainfall_datetime:'2026-10-07 18:00'}),
+ mkS(1101075,'องค์การบริหารส่วนตำบลสะกอม','จะนะ','สะกอม',{rain_24h:0,rainfall_datetime:'2026-10-07 18:50'}),
+ mkS(1119612,'บ้านบ่อโซน หมู่ 7 (ข้างศูนย์พัฒนาเด็กเล็ก)','จะนะ','สะกอม',{rain_24h:0,rainfall_datetime:'2026-10-07 18:50'})
+];
+const SNAP_WL=[
+ {station:{id:850,tele_station_name:{th:'นาทวี'},min_bank:22.71,left_bank:22.712,right_bank:23.065},geocode:{amphoe_name:{th:'นาทวี'},tumbon_name:{th:'นาทวี'}},river_name:'คลองนาทวี',waterlevel_msl:'20.10',diff_wl_bank:'2.61',situation_level:3,waterlevel_datetime:'2026-10-07 19:40'},
+ {station:{id:849,tele_station_name:{th:'จะนะ'},min_bank:4.75,left_bank:4.754,right_bank:6.351},geocode:{amphoe_name:{th:'จะนะ'},tumbon_name:{th:'บ้านนา'}},river_name:'คลองลึก',waterlevel_msl:'2.73',diff_wl_bank:'2.02',situation_level:1,waterlevel_datetime:'2026-10-07 19:40'}
+];
+
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const lsGet=k=>{ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } };
 const lsSet=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} };
 let twChain=Promise.resolve();
-function twFetch(key,url,ttl,reduce){
+// ดึงสดจาก thaiwater.net → ถ้าไม่ได้ ใช้แคชที่เคยดึงสำเร็จ → ถ้าไม่มีอีก ใช้ข้อมูลสำรองที่ฝังไว้
+function twFetch(key,url,ttl,reduce,snap){
   const c=lsGet('tw:'+key);
   if(c && c.d && Date.now()-c.t<ttl) return Promise.resolve({data:c.d,t:c.t,cached:true,stale:false});
   const run=async()=>{
-    let lastErr='';
-    for(let i=0;i<3;i++){
-      try{
-        const r=await fetch(url,{cache:'no-store'});
-        if(r.status===429){
-          const ra=Number(r.headers.get('Retry-After'));
-          lastErr='HTTP 429';
-          await sleep(((isFinite(ra)&&ra>0)?Math.min(ra,30):Math.pow(2,i)*4)*1000);
-          continue;
-        }
-        if(!r.ok) throw new Error('HTTP '+r.status);
+    let err='';
+    try{
+      const r=await fetch(url,{cache:'no-store'});
+      if(r.ok){
         const data=reduce(await r.json());
         lsSet('tw:'+key,{t:Date.now(),d:data});
         return {data,t:Date.now(),cached:false,stale:false};
-      }catch(e){ lastErr=e.message||'error'; if(lastErr!=='HTTP 429') break; }
-    }
-    // ดึงไม่สำเร็จ → ใช้ข้อมูลแคชเก่าที่เก็บไว้ (ถ้ามี) แทนการแสดงว่าง
-    if(c && c.d) return {data:c.d,t:c.t,cached:true,stale:true,err:lastErr};
-    throw new Error(lastErr==='HTTP 429' ? 'HTTP 429 — เซิร์ฟเวอร์จำกัดความถี่การเรียก' : lastErr);
+      }
+      err='HTTP '+r.status;           // 429 = เซิร์ฟเวอร์ไม่อนุญาต/จำกัดโควตาสำหรับหน้านี้ → ไม่ลองซ้ำ
+    }catch(e){ err=(e&&e.message)||'error'; }
+    if(c && c.d && c.t>SNAP_T) return {data:c.d,t:c.t,cached:true,stale:true,err};
+    return {data:snap,t:SNAP_T,cached:true,stale:true,snap:true,err};
   };
-  const job=twChain.catch(()=>{}).then(()=>sleep(TW_GAP)).then(run);
+  const job=twChain.catch(()=>{}).then(()=>sleep(800)).then(run);
   twChain=job; return job;
 }
 function twNote(res){
   if(!res.cached) return '';
-  const t=new Date(res.t).toLocaleTimeString('th-TH',{timeStyle:'short'});
-  return res.stale ? ` · <b style="color:var(--orange)">เซิร์ฟเวอร์จำกัดการเรียก (${res.err}) — แสดงข้อมูลที่เก็บไว้เมื่อ ${t}</b>` : ` · ข้อมูลแคช ${t}`;
+  const t=new Date(res.t).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  if(res.snap) return ` · <b style="color:var(--orange)">ข้อมูลสำรองที่ฝังไว้ ณ ${t}</b> — ดึงสดไม่ได้ (${res.err}: เซิร์ฟเวอร์ thaiwater ไม่อนุญาตให้เรียกจากหน้านี้) ข้อมูลเก่าเกิน 6 ชม. จะไม่ถูกนำไปคำนวณความเสี่ยง`;
+  return res.stale ? ` · <b style="color:var(--orange)">ดึงสดไม่ได้ (${res.err}) — แสดงข้อมูลที่เก็บไว้เมื่อ ${t}</b>` : ` · ข้อมูลแคช ${t}`;
 }
-const twRetry={};
-function twRetryLater(name,fn){ if(twRetry[name]) return; twRetry[name]=setTimeout(()=>{ twRetry[name]=null; fn(); },2*60*1000); }
-
-const WL_URL='https://api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_load?province_code=90';
-const WL_IDS=['849','850'];           // 849 = จะนะ 1 (คลองลูก) · 850 = นาทวี (คลองนาทวี)
-const WL_AMPHOE=['จะนะ','นาทวี'];
 const txt=v=> v==null?'' : (typeof v==='string'||typeof v==='number') ? String(v) : (v.th||v.en||v.name||'');
+const parseT=ts=>{ if(!ts) return null; const x=new Date(String(ts).replace(' ','T')+(/[zZ]|[+-]\d\d:?\d\d$/.test(String(ts))?'':'+07:00')); return isNaN(x)?null:x; };   // เวลาของ สสน. เป็นเวลาไทย
 function wlStatus(fb){
   if(fb==null) return {t:'ไม่มีข้อมูลตลิ่ง', c:'var(--muted)', bg:'var(--panel)', bar:'var(--muted)'};
   if(fb<=0)   return {t:'ล้นตลิ่ง',            c:'var(--red)',    bg:'var(--red-bg)',    bar:'#ef4444'};
@@ -570,6 +594,8 @@ function wlStatus(fb){
   if(fb<1.0)  return {t:'น้ำค่อนข้างมาก',      c:'var(--yellow)', bg:'var(--yellow-bg)', bar:'#eab308'};
   return            {t:'ปกติ (ต่ำกว่าตลิ่ง)', c:'var(--green)',  bg:'var(--green-bg)',  bar:'#22c55e'};
 }
+
+/* ===== ระดับน้ำคลอง ===== */
 async function loadWaterLevel(){
   const box=$('wlCards'), msg=$('wlMsg');
   try{
@@ -577,26 +603,25 @@ async function loadWaterLevel(){
       const arr=(d.waterlevel_data&&d.waterlevel_data.data)||d.data||[];
       return arr.filter(s=>{
         const g=JSON.stringify(s.geocode||{});
-        return WL_IDS.includes(String(s.station_id)) || WL_AMPHOE.some(a=>g.includes(a));
+        return WL_IDS.includes(String((s.station||{}).id)) || WL_AMPHOE.some(a=>g.includes(a));
       });
-    });
+    },SNAP_WL);
     const rows=res.data;
-    if(!rows.length) throw new Error('ไม่พบสถานีในอำเภอเป้าหมาย');
+    if(!rows||!rows.length) throw new Error('ไม่พบสถานีในอำเภอเป้าหมาย');
     let minFree=null, minName='';
     let html='';
     rows.forEach(s=>{
-      const gc=s.geocode||{};
-      const name=txt(s.tele_station_name)||('สถานี '+s.station_id);
-      const amp=txt(gc.amphoe_name)||'', tum=txt(gc.tumbon_name)||'';
-      const river=txt(s.river_name)||'';
-      const wl=Number(s.waterlevel_msl), bank=Number(s.min_bank);
+      const st0=s.station||{}, gc=s.geocode||{};
+      const name=txt(st0.tele_station_name)||('สถานี '+st0.id);
+      const amp=txt(gc.amphoe_name), tum=txt(gc.tumbon_name), river=txt(s.river_name);
+      const wl=Number(s.waterlevel_msl), bank=Number(st0.min_bank);
       let fb=Number(s.diff_wl_bank);
       if(!isFinite(fb)) fb=(isFinite(bank)&&isFinite(wl))? bank-wl : null;
-      if(fb!=null && (minFree==null||fb<minFree)){ minFree=fb; minName=name; }
+      const t=parseT(s.waterlevel_datetime);
+      const tsTxt=t?t.toLocaleString('th-TH',{dateStyle:'medium',timeStyle:'short'}):'';
+      const stale=t?((Date.now()-t.getTime())>6*3.6e6):false;
+      if(fb!=null && !stale && (minFree==null||fb<minFree)){ minFree=fb; minName=name; }   // ใช้คำนวณความเสี่ยงเฉพาะข้อมูลที่ไม่เก่าเกิน 6 ชม.
       const st=wlStatus(fb);
-      const ts=s.waterlevel_datetime||s.datetime||s.waterlevel_date||s.date_time||'';
-      let tsTxt='', stale=false;
-      if(ts){ const t=new Date(String(ts).replace(' ','T')); if(!isNaN(t)){ tsTxt=t.toLocaleString('th-TH',{dateStyle:'medium',timeStyle:'short'}); stale=(Date.now()-t.getTime())>6*3.6e6; } }
       const pct= fb==null?0 : Math.max(4,Math.min(100,(1-fb/3)*100));   // เต็มเมื่อใกล้/ล้นตลิ่ง (สเกล 3 ม.)
       html+=`<div class="wl-card">
         <div class="wl-top"><div><div class="wl-name">${name}</div>
@@ -606,24 +631,22 @@ async function loadWaterLevel(){
         <div class="wl-row"><span>ตลิ่งต่ำสุด</span><b>${isFinite(bank)?fmt(bank,2)+' ม.':'–'}</b></div>
         <div class="wl-row"><span>เหลืออีกถึงตลิ่ง</span><b>${fb==null?'–':fmt(fb,2)+' ม.'}</b></div>
         <div class="wl-bar"><i style="width:${pct}%;background:${st.bar}"></i></div>
-        <div class="wl-row" style="margin-top:8px"><span>${tsTxt?('วัดเมื่อ '+tsTxt):'—'}</span>${stale?'<b style="color:var(--orange)">ข้อมูลอาจล่าช้า</b>':''}</div>
+        <div class="wl-row" style="margin-top:8px"><span>${tsTxt?('วัดเมื่อ '+tsTxt):'—'}</span>${stale?'<b style="color:var(--orange)">ข้อมูลเก่า</b>':''}</div>
       </div>`;
     });
     box.innerHTML=html;
-    WL={minFree,minName};
-    msg.innerHTML='แหล่งข้อมูล: <a href="https://www.thaiwater.net/water/wl" target="_blank" rel="noopener">คลังข้อมูลน้ำแห่งชาติ (thaiwater.net)</a> · ดูกราฟย้อนหลังที่ <a href="https://songkhla.thaiwater.net/wl" target="_blank" rel="noopener">ศูนย์ข้อมูลน้ำ จ.สงขลา</a>'+twNote(res);
+    WL=(minFree==null)?null:{minFree,minName};
+    msg.innerHTML='แหล่งข้อมูล: <a href="https://www.thaiwater.net/water/wl" target="_blank" rel="noopener">คลังข้อมูลน้ำแห่งชาติ (thaiwater.net)</a> · ดูข้อมูลสดที่ <a href="https://songkhla.thaiwater.net/wl" target="_blank" rel="noopener">ศูนย์ข้อมูลน้ำ จ.สงขลา</a>'+twNote(res);
     computeRisk();
-    if(res.stale) twRetryLater('wl',loadWaterLevel);
   }catch(e){
-    WL=null; twRetryLater('wl',loadWaterLevel);
-    box.innerHTML='<div class="err">ดึงระดับน้ำจาก thaiwater.net ไม่สำเร็จ ('+e.message+') — ระบบจะลองใหม่อัตโนมัติใน 2 นาที</div>';
-    msg.innerHTML='เปิดดูตรงที่ <a href="https://songkhla.thaiwater.net/wl" target="_blank" rel="noopener">ศูนย์ข้อมูลน้ำ จ.สงขลา</a> หรือ <a href="https://www.thaiwater.net/water/wl" target="_blank" rel="noopener">thaiwater.net</a> (ระบบอาจถูกจำกัดการเรียกจากเบราว์เซอร์/ต้นทางขัดข้องชั่วคราว) · ระดับน้ำจะไม่ถูกนำไปคำนวณความเสี่ยงจนกว่าจะโหลดได้';
+    WL=null;
+    box.innerHTML='<div class="err">แสดงระดับน้ำไม่สำเร็จ ('+e.message+')</div>';
+    msg.innerHTML='เปิดดูตรงที่ <a href="https://songkhla.thaiwater.net/wl" target="_blank" rel="noopener">ศูนย์ข้อมูลน้ำ จ.สงขลา</a>';
     computeRisk();
   }
 }
 
-/* ===== ปริมาณฝนรายสถานี จาก thaiwater.net (อ.จะนะ + อ.นาทวี) ===== */
-const RN_URL='https://api-v3.thaiwater.net/api/v1/thaiwater30/public/rain_24h?province_code=90';
+/* ===== ปริมาณฝนรายสถานี ===== */
 function rnClass(v){
   if(v==null) return 'var(--muted)';
   if(v>=90) return 'var(--red)'; if(v>=35) return 'var(--orange)'; if(v>=10) return 'var(--yellow)'; return 'var(--ink)';
@@ -634,18 +657,17 @@ async function loadRain(){
     const res=await twFetch('rn',RN_URL,TW_TTL,d=>{
       const a=d.data||(d.rain_data&&d.rain_data.data)||[];
       return a.filter(s=>WL_AMPHOE.some(x=>JSON.stringify(s.geocode||{}).includes(x)));
-    });
+    },SNAP_RAIN);
     const arr=res.data;
     const num=v=>{ const n=Number(v); return (v==null||v===''||!isFinite(n))?null:n; };
     let html='', all=[], any=false;
     WL_AMPHOE.forEach(amp=>{
-      const rows=arr.filter(s=>JSON.stringify(s.geocode||{}).includes(amp)).map(s=>{
+      const rows=arr.filter(s=>txt((s.geocode||{}).amphoe_name).includes(amp)).map(s=>{
         const st=s.station||{};
-        const ts=s.rainfall_datetime||s.datetime||'';
-        let t=null; if(ts){ const x=new Date(String(ts).replace(' ','T')); if(!isNaN(x)) t=x; }
-        return {name:txt(st.tele_station_name)||txt(s.tele_station_name)||('สถานี '+(st.id||s.id)),
+        const t=parseT(s.rainfall_datetime);
+        return {name:txt(st.tele_station_name)||('สถานี '+st.id), tum:txt((s.geocode||{}).tumbon_name),
                 h1:num(s.rain_1h), h24:num(s.rain_24h), t, fresh: t? (Date.now()-t.getTime())<6*3.6e6 : true};
-      }).sort((a,b)=>(b.h24??-1)-(a.h24??-1));
+      }).sort((a,b)=>(b.h24==null?-1:b.h24)-(a.h24==null?-1:a.h24));
       if(!rows.length) return;
       any=true;
       const v=rows.filter(x=>x.h24!=null);
@@ -655,7 +677,7 @@ async function loadRain(){
         `<div class="rn-head"><span>สถานี</span><span>1 ชม.</span><span>24 ชม.</span><span>เวลาวัด</span></div>`;
       rows.forEach(x=>{
         const tt=x.t?x.t.toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'—';
-        html+=`<div class="rn-row"><span>${x.name}${x.fresh?'':' <small style="color:var(--orange)">· ข้อมูลเก่า</small>'}</span>`+
+        html+=`<div class="rn-row"><span>${x.name}${x.tum?` <small style="color:var(--muted)">· ต.${x.tum}</small>`:''}${x.fresh?'':' <small style="color:var(--orange)">· ข้อมูลเก่า</small>'}</span>`+
           `<span>${x.h1==null?'–':fmt(x.h1,1)}</span>`+
           `<span class="rn-val" style="color:${rnClass(x.h24)}">${x.h24==null?'–':fmt(x.h24,1)}</span>`+
           `<span style="color:var(--muted);font-size:.78rem">${tt}</span></div>`;
@@ -673,12 +695,11 @@ async function loadRain(){
     } else { RAIN=null; sum.style.display='block'; sum.innerHTML='<span class="err">ข้อมูลสถานีเก่าเกิน 6 ชม. — ไม่นำไปคำนวณความเสี่ยง</span>'; }
     msg.innerHTML='แหล่งข้อมูล: <a href="https://songkhla.thaiwater.net/rainfall" target="_blank" rel="noopener">ศูนย์ข้อมูลน้ำ จ.สงขลา (ฝนรายสถานี)</a> · สีตัวเลข: เหลือง ≥10 มม. ส้ม ≥35 มม. แดง ≥90 มม.'+twNote(res);
     computeRisk();
-    if(res.stale) twRetryLater('rn',loadRain);
   }catch(e){
-    RAIN=null; twRetryLater('rn',loadRain);
-    box.innerHTML='<div class="err">ดึงปริมาณฝนจาก thaiwater.net ไม่สำเร็จ ('+e.message+') — ระบบจะลองใหม่อัตโนมัติใน 2 นาที</div>';
+    RAIN=null;
+    box.innerHTML='<div class="err">แสดงปริมาณฝนไม่สำเร็จ ('+e.message+')</div>';
     sum.style.display='none';
-    msg.innerHTML='เปิดดูตรงที่ <a href="https://songkhla.thaiwater.net/rainfall" target="_blank" rel="noopener">ปริมาณฝนรายสถานี จ.สงขลา</a> · ฝนวัดจริงจะไม่ถูกนำไปคำนวณความเสี่ยงจนกว่าจะโหลดได้';
+    msg.innerHTML='เปิดดูตรงที่ <a href="https://songkhla.thaiwater.net/rainfall" target="_blank" rel="noopener">ปริมาณฝนรายสถานี จ.สงขลา</a>';
     computeRisk();
   }
 }
